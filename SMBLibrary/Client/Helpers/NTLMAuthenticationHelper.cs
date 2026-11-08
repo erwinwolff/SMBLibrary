@@ -67,7 +67,7 @@ namespace SMBLibrary.Client
 
             DateTime time = DateTime.UtcNow;
             byte[] clientChallenge = new byte[8];
-            new Random().NextBytes(clientChallenge);
+            SecureRandom.GetBytes(clientChallenge);
 
             AuthenticateMessage authenticateMessage = new AuthenticateMessage();
             // https://msdn.microsoft.com/en-us/library/cc236676.aspx
@@ -170,7 +170,7 @@ namespace SMBLibrary.Client
             if ((challengeMessage.NegotiateFlags & NegotiateFlags.KeyExchange) > 0)
             {
                 sessionKey = new byte[16];
-                new Random().NextBytes(sessionKey);
+                SecureRandom.GetBytes(sessionKey);
                 authenticateMessage.EncryptedRandomSessionKey = RC4.Encrypt(keyExchangeKey, sessionKey);
             }
             else

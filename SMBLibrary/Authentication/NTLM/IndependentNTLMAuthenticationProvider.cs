@@ -411,7 +411,7 @@ namespace SMBLibrary.Authentication.NTLM
         private static byte[] GenerateServerChallenge()
         {
             byte[] serverChallenge = new byte[8];
-            new Random().NextBytes(serverChallenge);
+            SecureRandom.GetBytes(serverChallenge);
             return serverChallenge;
         }
     }

@@ -846,7 +846,7 @@ namespace SMBLibrary.Client
             PreAuthIntegrityCapabilities preAuthIntegrityCapabilities = new PreAuthIntegrityCapabilities();
             preAuthIntegrityCapabilities.HashAlgorithms.Add(HashAlgorithm.SHA512);
             preAuthIntegrityCapabilities.Salt = new byte[32];
-            new Random().NextBytes(preAuthIntegrityCapabilities.Salt);
+            SecureRandom.GetBytes(preAuthIntegrityCapabilities.Salt);
 
             EncryptionCapabilities encryptionCapabilities = new EncryptionCapabilities();
             encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Ccm);
