@@ -13,6 +13,7 @@ The changes compared to SMBLibrary 1.5.8.1:
 ###### Target frameworks
 - The libraries target .NET Framework 4.8.1 and .NET 10 (net481;net10.0). Support for .NET 2.0, .NET 4.0, .NET Standard 2.0 and .NET Core 3.1 was removed.
 - SMBServer targets net481;net10.0-windows, the tests target net481;net10.0 and use MSTest 4.
+- The Utilities project is merged into SMBLibrary (folder SMBLibrary/Utilities, namespace Utilities unchanged): one assembly, no ILRepack step.
 - Framework specific code uses the NET and NETFRAMEWORK symbols. The .NET 2.0 code paths (Thread.Abort, the C# 2.0 Parallel helper) are gone.
 - Obsolete APIs were replaced: RijndaelManaged by Aes, System.TimeZone by TimeZoneInfo, the TCP keep-alive constants by the named socket options of .NET.
 
@@ -22,13 +23,13 @@ The changes compared to SMBLibrary 1.5.8.1:
 
 ###### SMB 3.1.1 encryption
 - In addition to AES-128-CCM the client negotiates AES-128-GCM, AES-256-GCM and AES-256-CCM (SMB2_ENCRYPTION_CAPABILITIES). AES-256 ciphers use 256 bit keys.
-- AES-GCM uses the AesGcm class of .NET 10. .NET Framework has no AES-GCM, so a managed implementation is used there (Utilities.AesGcmCipher), verified against the NIST test vectors and the .NET implementation.
-- Cipher preference: GCM first on .NET 10, CCM first on .NET Framework (where the managed GCM is slower than CCM).
+- AES-GCM and AES-CCM are hardware accelerated: .NET 10 uses its AesGcm and AesCcm classes, .NET Framework uses Windows CNG (bcrypt.dll). A managed implementation remains as fallback for .NET 10 platforms without them, verified against the NIST and RFC test vectors and against .NET and CNG.
+- Cipher preference: AES-128-GCM, AES-128-CCM, AES-256-GCM, AES-256-CCM (the order Windows uses).
 - If a session or share requires encryption but no cipher was negotiated, the client returns STATUS_ACCESS_DENIED instead of sending data in plain text.
 - Fixed: the cipher list of SMB2_ENCRYPTION_CAPABILITIES was read two bytes too early.
 
 ###### SMB 3.1.1 signing
-- The client negotiates AES-GMAC signing (SMB2_SIGNING_CAPABILITIES, RFC 4543), with AES-CMAC as fallback. The order follows the cipher preference above.
+- The client negotiates AES-GMAC signing (SMB2_SIGNING_CAPABILITIES, RFC 4543), with AES-CMAC as fallback.
 - Without a signing context the dialect decides as before: HMAC-SHA256 for SMB 2.x, AES-CMAC for SMB 3.x.
 
 ###### Notes

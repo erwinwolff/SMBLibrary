@@ -59,29 +59,21 @@ namespace SMBLibrary.Client
 
         /// <summary>
         /// The ciphers offered for SMB 3.1.1, in order of preference. Change before Connect, e.g. to force one cipher.
-        /// .NET has hardware accelerated AES-GCM, so GCM first (the order Windows uses); .NET Framework only has the
-        /// managed GCM, which is slower than CCM there, so CCM first.
+        /// AES-GCM is hardware accelerated on both targets (.NET: AesGcm, .NET Framework: Windows CNG), so GCM first,
+        /// the order Windows uses.
         /// </summary>
         public List<CipherAlgorithm> EncryptionCiphers { get; set; } = new List<CipherAlgorithm>
         {
-#if NET
             CipherAlgorithm.Aes128Gcm, CipherAlgorithm.Aes128Ccm, CipherAlgorithm.Aes256Gcm, CipherAlgorithm.Aes256Ccm
-#else
-            CipherAlgorithm.Aes128Ccm, CipherAlgorithm.Aes128Gcm, CipherAlgorithm.Aes256Ccm, CipherAlgorithm.Aes256Gcm
-#endif
         };
 
         /// <summary>
         /// The signing algorithms offered for SMB 3.1.1, in order of preference. Change before Connect.
-        /// Same reasoning as the ciphers: AES-GMAC is the fast one on .NET, AES-CMAC on .NET Framework.
+        /// AES-GMAC first: like AES-GCM it is hardware accelerated on both targets.
         /// </summary>
         public List<SigningAlgorithm> SigningAlgorithms { get; set; } = new List<SigningAlgorithm>
         {
-#if NET
             SigningAlgorithm.AesGmac, SigningAlgorithm.AesCmac
-#else
-            SigningAlgorithm.AesCmac, SigningAlgorithm.AesGmac
-#endif
         };
         private uint m_maxTransactSize;
         private uint m_maxReadSize;
