@@ -57,7 +57,7 @@ namespace SMBLibrary.Authentication.NTLM
             ICryptoTransform transform;
             if (DES.IsWeakKey(rgbKey) || DES.IsSemiWeakKey(rgbKey))
             {
-#if NETSTANDARD2_0_OR_GREATER || NET5_0_OR_GREATER
+#if NET
                 MethodInfo getTransformCoreMethodInfo = des.GetType().GetMethod("CreateTransformCore", BindingFlags.NonPublic | BindingFlags.Static);
                 object[] getTransformCoreParameters = { mode, des.Padding, rgbKey, rgbIV, des.BlockSize / 8 , des.FeedbackSize / 8,  des.BlockSize / 8, true };
                 transform = getTransformCoreMethodInfo.Invoke(null, getTransformCoreParameters) as ICryptoTransform;
@@ -114,7 +114,7 @@ namespace SMBLibrary.Authentication.NTLM
 
         public static Encoding GetOEMEncoding()
         {
-#if NETSTANDARD2_0_OR_GREATER || NET5_0_OR_GREATER
+#if NET
             return ASCIIEncoding.GetEncoding(28591);
 #else
             return Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage);

@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net20;net40;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net481;net10.0</TargetFrameworks>
     <AssemblyName>SMBLibrary</AssemblyName>
     <Version>1.5.8.1</Version>
     <NoWarn>1573;1591</NoWarn>
@@ -19,12 +19,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Utilities\Utilities.csproj" PrivateAssets="All" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-    <PackageReference Include="System.Buffers">
-      <Version>4.5.1</Version>
-    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>

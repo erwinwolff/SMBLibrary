@@ -64,7 +64,7 @@ namespace Utilities
         {
             using (MemoryStream ms = new MemoryStream())
             {
-                RijndaelManaged aes = new RijndaelManaged();
+                Aes aes = Aes.Create();
                 aes.Mode = CipherMode.CBC;
                 aes.Padding = PaddingMode.None;
 
