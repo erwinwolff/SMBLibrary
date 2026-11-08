@@ -15,9 +15,4 @@
     <ProjectReference Include="..\SMBLibrary\SMBLibrary.csproj" />
   </ItemGroup>
 
-  <!-- In Release Utilities is merged into SMBLibrary (ILRepack), in Debug it is a separate assembly -->
-  <ItemGroup Condition="'$(Configuration)' != 'Release'">
-    <ProjectReference Include="..\Utilities\Utilities.csproj" />
-  </ItemGroup>
-
 </Project>
