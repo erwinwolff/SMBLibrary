@@ -55,6 +55,17 @@ namespace Utilities
 #endif
         }
 
+        /// <summary>
+        /// AES-GMAC (RFC 4543): the GCM tag of the data without encrypting anything
+        /// </summary>
+        public static byte[] ComputeGmac(byte[] key, byte[] nonce, byte[] data, int offset, int length)
+        {
+            byte[] associatedData = ByteReader.ReadBytes(data, offset, length);
+            byte[] tag;
+            Encrypt(key, nonce, new byte[0], associatedData, out tag);
+            return tag;
+        }
+
         private static void Validate(byte[] key, byte[] nonce)
         {
             if (key == null || (key.Length != 16 && key.Length != 24 && key.Length != 32))

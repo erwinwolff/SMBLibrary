@@ -72,6 +72,8 @@ namespace SMBLibrary.SMB2
                     return new PreAuthIntegrityCapabilities(buffer, offset);
                 case NegotiateContextType.SMB2_ENCRYPTION_CAPABILITIES:
                     return new EncryptionCapabilities(buffer, offset);
+                case NegotiateContextType.SMB2_SIGNING_CAPABILITIES:
+                    return new SigningCapabilities(buffer, offset);
                 default:
                     return new NegotiateContext(buffer, offset);
             }

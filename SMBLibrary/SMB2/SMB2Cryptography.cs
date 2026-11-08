@@ -18,14 +18,27 @@ namespace SMBLibrary.SMB2
 
         public static byte[] CalculateSignature(byte[] signingKey, SMB2Dialect dialect, byte[] buffer, int offset, int paddedLength)
         {
+            return CalculateSignature(signingKey, GetDefaultSigningAlgorithm(dialect), buffer, offset, paddedLength);
+        }
+
+        /// <param name="offset">Start of the SMB2 header of the message</param>
+        /// <param name="paddedLength">Length of the message, including the padding inside a compound chain</param>
+        public static byte[] CalculateSignature(byte[] signingKey, SigningAlgorithm signingAlgorithm, byte[] buffer, int offset, int paddedLength)
+        {
             byte[] hash;
-            if (dialect == SMB2Dialect.SMB202 || dialect == SMB2Dialect.SMB210)
+            switch (signingAlgorithm)
             {
-                hash = new HMACSHA256(signingKey).ComputeHash(buffer, offset, paddedLength);
-            }
-            else
-            {
-                hash = AesCmac.CalculateAesCmac(signingKey, buffer, offset, paddedLength);
+                case SigningAlgorithm.HmacSha256:
+                    hash = new HMACSHA256(signingKey).ComputeHash(buffer, offset, paddedLength);
+                    break;
+                case SigningAlgorithm.AesCmac:
+                    hash = AesCmac.CalculateAesCmac(signingKey, buffer, offset, paddedLength);
+                    break;
+                case SigningAlgorithm.AesGmac:
+                    hash = AesGcmCipher.ComputeGmac(signingKey, GetGmacNonce(buffer, offset), buffer, offset, paddedLength);
+                    break;
+                default:
+                    throw new NotSupportedException($"Signing algorithm {signingAlgorithm} is not supported");
             }
 
             // [MS-SMB2] The first 16 bytes of the hash MUST be copied into the 16-byte signature field of the SMB2 Header.
@@ -34,10 +47,58 @@ namespace SMBLibrary.SMB2
 
         public static bool VerifySignature(byte[] messageBytes, SMB2Dialect dialect, byte[] signingKey)
         {
+            return VerifySignature(messageBytes, GetDefaultSigningAlgorithm(dialect), signingKey);
+        }
+
+        public static bool VerifySignature(byte[] messageBytes, SigningAlgorithm signingAlgorithm, byte[] signingKey)
+        {
             byte[] signature = ByteReader.ReadBytes(messageBytes, SMB2Header.SignatureOffset, SMB2Header.SignatureLength);
             Array.Clear(messageBytes, SMB2Header.SignatureOffset, SMB2Header.SignatureLength);
-            byte[] expectedSignature = CalculateSignature(signingKey, dialect, messageBytes, 0, messageBytes.Length);
+            byte[] expectedSignature = CalculateSignature(signingKey, signingAlgorithm, messageBytes, 0, messageBytes.Length);
             return ByteUtils.AreByteArraysEqual(signature, expectedSignature);
+        }
+
+        /// <summary>
+        /// The algorithm of a dialect without SMB2_SIGNING_CAPABILITIES: HMAC-SHA256 for 2.0.2 and 2.1, AES-CMAC for 3.x
+        /// </summary>
+        public static SigningAlgorithm GetDefaultSigningAlgorithm(SMB2Dialect dialect)
+        {
+            if (dialect == SMB2Dialect.SMB202 || dialect == SMB2Dialect.SMB210)
+            {
+                return SigningAlgorithm.HmacSha256;
+            }
+            return SigningAlgorithm.AesCmac;
+        }
+
+        public static bool IsSupportedSigningAlgorithm(SigningAlgorithm signingAlgorithm)
+        {
+            return signingAlgorithm == SigningAlgorithm.HmacSha256 || signingAlgorithm == SigningAlgorithm.AesCmac || signingAlgorithm == SigningAlgorithm.AesGmac;
+        }
+
+        /// <summary>
+        /// [MS-SMB2] 3.1.4.1 The 12 byte AES-GMAC nonce: MessageId, then 4 bytes in which bit 0 is set when the server
+        /// sent the message and bit 1 when it is a CANCEL request
+        /// </summary>
+        private static byte[] GetGmacNonce(byte[] buffer, int offset)
+        {
+            const int CommandOffset = 12;
+            const int FlagsOffset = 16;
+            const int MessageIdOffset = 24;
+
+            byte[] nonce = new byte[AesGcmNonceLength];
+            Array.Copy(buffer, offset + MessageIdOffset, nonce, 0, 8);
+
+            SMB2PacketHeaderFlags flags = (SMB2PacketHeaderFlags)LittleEndianConverter.ToUInt32(buffer, offset + FlagsOffset);
+            SMB2CommandName command = (SMB2CommandName)LittleEndianConverter.ToUInt16(buffer, offset + CommandOffset);
+            if ((flags & SMB2PacketHeaderFlags.ServerToRedir) > 0)
+            {
+                nonce[8] |= 0x01;
+            }
+            if (command == SMB2CommandName.Cancel)
+            {
+                nonce[8] |= 0x02;
+            }
+            return nonce;
         }
 
         public static byte[] GenerateSigningKey(byte[] sessionKey, SMB2Dialect dialect, byte[] preauthIntegrityHashValue)

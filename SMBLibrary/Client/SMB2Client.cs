@@ -55,6 +55,7 @@ namespace SMBLibrary.Client
         private byte[] m_decryptionKey;
         private bool m_encryptionSupported;
         private CipherAlgorithm m_cipherId = CipherAlgorithm.Aes128Ccm; // Connection.CipherId
+        private SigningAlgorithm m_signingAlgorithm = SigningAlgorithm.HmacSha256; // Connection.SigningAlgorithmId
         private uint m_maxTransactSize;
         private uint m_maxReadSize;
         private uint m_maxWriteSize;
@@ -244,6 +245,21 @@ namespace SMBLibrary.Client
             if (response != null && response.Header.Status == NTStatus.STATUS_SUCCESS)
             {
                 m_dialect = response.DialectRevision;
+
+                // Without SMB2_SIGNING_CAPABILITIES the dialect decides: HMAC-SHA256 for 2.x, AES-CMAC for 3.x
+                m_signingAlgorithm = SMB2Cryptography.GetDefaultSigningAlgorithm(response.DialectRevision);
+                if (response.DialectRevision == SMB2Dialect.SMB311)
+                {
+                    // [MS-SMB2] 3.2.5.2 The server answers with the one signing algorithm it selected
+                    foreach (NegotiateContext context in response.NegotiateContextList)
+                    {
+                        SigningCapabilities signingCapabilities = context as SigningCapabilities;
+                        if (signingCapabilities != null && signingCapabilities.SigningAlgorithms.Count == 1 && SMB2Cryptography.IsSupportedSigningAlgorithm(signingCapabilities.SigningAlgorithms[0]))
+                        {
+                            m_signingAlgorithm = signingCapabilities.SigningAlgorithms[0];
+                        }
+                    }
+                }
 
                 // SMB 3.0 and 3.0.2 know only AES-128-CCM; SMB 3.1.1 negotiates the cipher
                 m_cipherId = CipherAlgorithm.Aes128Ccm;
@@ -670,7 +686,7 @@ namespace SMBLibrary.Client
                     bool shouldBeSigned = m_isLoggedIn && m_signingRequired && !isEncrypted && !isInterimResponse;
 
                     // [MS-SMB2] 3.2.5.1.3 If signature verification fails, the client MUST discard the received message. The client MAY also choose to disconnect the connection
-                    if (shouldBeSigned && !SMB2Cryptography.VerifySignature(messageBytes, m_dialect, m_signingKey))
+                    if (shouldBeSigned && !SMB2Cryptography.VerifySignature(messageBytes, m_signingAlgorithm, m_signingKey))
                     {
                         Log("Invalid SMB2 response signature");
                         return;
@@ -857,7 +873,7 @@ namespace SMBLibrary.Client
                 {
                     request.Header.Signature = new byte[16]; // Request could be reused
                     byte[] buffer = request.GetBytes();
-                    byte[] signature = SMB2Cryptography.CalculateSignature(m_signingKey, m_dialect, buffer, 0, buffer.Length);
+                    byte[] signature = SMB2Cryptography.CalculateSignature(m_signingKey, m_signingAlgorithm, buffer, 0, buffer.Length);
                     // [MS-SMB2] The first 16 bytes of the hash MUST be copied into the 16-byte signature field of the SMB2 Header.
                     request.Header.Signature = ByteReader.ReadBytes(signature, 0, 16);
                 }
@@ -898,10 +914,21 @@ namespace SMBLibrary.Client
             encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Gcm);
 #endif
 
+            // Same reasoning as the ciphers: AES-GMAC is the fast one on .NET, AES-CMAC on .NET Framework
+            SigningCapabilities signingCapabilities = new SigningCapabilities();
+#if NET
+            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesGmac);
+            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesCmac);
+#else
+            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesCmac);
+            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesGmac);
+#endif
+
             return new List<NegotiateContext>()
             {
                 preAuthIntegrityCapabilities,
-                encryptionCapabilities
+                encryptionCapabilities,
+                signingCapabilities
             };
         }
 
