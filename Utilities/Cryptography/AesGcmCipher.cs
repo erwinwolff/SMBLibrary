@@ -11,7 +11,8 @@ namespace Utilities
 {
     /// <summary>
     /// AES in Galois/Counter Mode (NIST SP 800-38D) with a 96 bit nonce and a 128 bit tag, the variant SMB 3.1.1 uses.
-    /// .NET 10 uses the AesGcm class of the platform; .NET Framework has none, so a managed implementation is used there.
+    /// .NET 10 uses the AesGcm class of the platform, .NET Framework uses Windows CNG (both hardware accelerated); the
+    /// managed implementation is the fallback when neither is available.
     /// </summary>
     public static class AesGcmCipher
     {
@@ -22,16 +23,23 @@ namespace Utilities
         {
             Validate(key, nonce);
 #if NET
-            byte[] result = new byte[data.Length];
-            tag = new byte[TagLength];
-            using (System.Security.Cryptography.AesGcm aesGcm = new System.Security.Cryptography.AesGcm(key, TagLength))
+            if (System.Security.Cryptography.AesGcm.IsSupported)
             {
-                aesGcm.Encrypt(nonce, data, result, tag, associatedData);
+                byte[] result = new byte[data.Length];
+                tag = new byte[TagLength];
+                using (System.Security.Cryptography.AesGcm aesGcm = new System.Security.Cryptography.AesGcm(key, TagLength))
+                {
+                    aesGcm.Encrypt(nonce, data, result, tag, associatedData);
+                }
+                return result;
             }
-            return result;
 #else
-            return AesGcmManaged.Encrypt(key, nonce, data, associatedData, out tag);
+            if (BCryptAead.IsGcmSupported)
+            {
+                return BCryptAead.EncryptGcm(key, nonce, data, 0, data.Length, associatedData, TagLength, out tag);
+            }
 #endif
+            return AesGcmManaged.Encrypt(key, nonce, data, associatedData, out tag);
         }
 
         /// <exception cref="CryptographicException">The data or the associated data was changed, or the key is wrong</exception>
@@ -43,16 +51,23 @@ namespace Utilities
                 throw new ArgumentException("tag must be 16 bytes long");
             }
 #if NET
-            byte[] result = new byte[encryptedData.Length];
-            using (System.Security.Cryptography.AesGcm aesGcm = new System.Security.Cryptography.AesGcm(key, TagLength))
+            if (System.Security.Cryptography.AesGcm.IsSupported)
             {
-                // Throws AuthenticationTagMismatchException, a CryptographicException
-                aesGcm.Decrypt(nonce, encryptedData, tag, result, associatedData);
+                byte[] result = new byte[encryptedData.Length];
+                using (System.Security.Cryptography.AesGcm aesGcm = new System.Security.Cryptography.AesGcm(key, TagLength))
+                {
+                    // Throws AuthenticationTagMismatchException, a CryptographicException
+                    aesGcm.Decrypt(nonce, encryptedData, tag, result, associatedData);
+                }
+                return result;
             }
-            return result;
 #else
-            return AesGcmManaged.DecryptAndAuthenticate(key, nonce, encryptedData, associatedData, tag);
+            if (BCryptAead.IsGcmSupported)
+            {
+                return BCryptAead.DecryptGcm(key, nonce, encryptedData, associatedData, tag);
+            }
 #endif
+            return AesGcmManaged.DecryptAndAuthenticate(key, nonce, encryptedData, associatedData, tag);
         }
 
         /// <summary>
@@ -60,9 +75,28 @@ namespace Utilities
         /// </summary>
         public static byte[] ComputeGmac(byte[] key, byte[] nonce, byte[] data, int offset, int length)
         {
+            Validate(key, nonce);
+#if NET
+            if (System.Security.Cryptography.AesGcm.IsSupported)
+            {
+                // The message is passed as a slice: no copy
+                byte[] gmac = new byte[TagLength];
+                using (System.Security.Cryptography.AesGcm aesGcm = new System.Security.Cryptography.AesGcm(key, TagLength))
+                {
+                    aesGcm.Encrypt(nonce, ReadOnlySpan<byte>.Empty, Span<byte>.Empty, gmac, new ReadOnlySpan<byte>(data, offset, length));
+                }
+                return gmac;
+            }
+#else
+            if (BCryptAead.IsGcmSupported)
+            {
+                // The message is passed as a pointer into the array: no copy
+                return BCryptAead.ComputeGmac(key, nonce, data, offset, length, TagLength);
+            }
+#endif
             byte[] associatedData = ByteReader.ReadBytes(data, offset, length);
             byte[] tag;
-            Encrypt(key, nonce, new byte[0], associatedData, out tag);
+            AesGcmManaged.Encrypt(key, nonce, new byte[0], associatedData, out tag);
             return tag;
         }
 
@@ -82,7 +116,7 @@ namespace Utilities
 
     /// <summary>
     /// Managed AES-GCM for .NET Framework, which has no AES-GCM of its own. AES itself comes from the platform (ECB
-    /// for the counter blocks), GHASH uses the 4 bit table method by Shoup. Compiled for every target so the tests
+    /// for the counter blocks), GHASH uses the 8 bit table method by Shoup. Compiled for every target so the tests
     /// can compare it with the AesGcm class of .NET.
     /// </summary>
     internal static class AesGcmManaged
@@ -206,29 +240,25 @@ namespace Utilities
         }
 
         /// <summary>
-        /// GHASH over GF(2^128) with precomputed multiples of H (4 bit tables)
+        /// GHASH over GF(2^128) with precomputed multiples of H for every byte value (Shoup's 8 bit tables, 4 KB per
+        /// key): one table lookup and one 8 bit shift per byte instead of 8 single bit steps
         /// </summary>
         private sealed class GHash
         {
-            // Reduction of the 4 bits shifted out at the low end, already in the bit reflected representation of GCM
-            private static readonly ulong[] Last4 =
-            {
-                0x0000, 0x1c20, 0x3840, 0x2460, 0x7080, 0x6ca0, 0x48c0, 0x54e0,
-                0xe100, 0xfd20, 0xd940, 0xc560, 0x9180, 0x8da0, 0xa9c0, 0xb5e0
-            };
+            // Reduction of the 8 bits shifted out at the low end when multiplying by x^8 (bit reflected, as GCM uses)
+            private static readonly ulong[] Reduction8 = BuildReductionTable();
 
-            private readonly ulong[] m_high = new ulong[16];
-            private readonly ulong[] m_low = new ulong[16];
+            private readonly ulong[] m_high = new ulong[256];
+            private readonly ulong[] m_low = new ulong[256];
 
             public GHash(byte[] h)
             {
+                // The first bit of a byte is the lowest power of x: entry 0x80 is H, 0x40 is H * x, ... 0x01 is H * x^7
                 ulong vh = BigEndianConverter.ToUInt64(h, 0);
                 ulong vl = BigEndianConverter.ToUInt64(h, 8);
-
-                // Entry 8 is H itself (the bit order is reversed), entries 4, 2 and 1 are H * x, H * x^2 and H * x^3
-                m_high[8] = vh;
-                m_low[8] = vl;
-                for (int index = 4; index > 0; index >>= 1)
+                m_high[0x80] = vh;
+                m_low[0x80] = vl;
+                for (int index = 0x40; index > 0; index >>= 1)
                 {
                     ulong reduction = (vl & 1) != 0 ? 0xe100000000000000UL : 0UL;
                     vl = (vh << 63) | (vl >> 1);
@@ -237,8 +267,8 @@ namespace Utilities
                     m_low[index] = vl;
                 }
 
-                // The other entries are sums of those
-                for (int index = 2; index <= 8; index *= 2)
+                // Multiplication is linear: every other entry is the sum of the entries of its bits
+                for (int index = 2; index <= 0x80; index *= 2)
                 {
                     vh = m_high[index];
                     vl = m_low[index];
@@ -250,67 +280,102 @@ namespace Utilities
                 }
             }
 
+            private static ulong[] BuildReductionTable()
+            {
+                // Shifting right by 8 is 8 single bit shifts; the bits that fall off are reduced into the top 64 bits.
+                // That only depends on the 8 bits that fall off, so it can be precomputed for every byte value.
+                ulong[] table = new ulong[256];
+                for (int value = 0; value < 256; value++)
+                {
+                    ulong vh = 0;
+                    ulong vl = (ulong)value;
+                    for (int bit = 0; bit < 8; bit++)
+                    {
+                        ulong reduction = (vl & 1) != 0 ? 0xe100000000000000UL : 0UL;
+                        vl = (vh << 63) | (vl >> 1);
+                        vh = (vh >> 1) ^ reduction;
+                    }
+                    table[value] = vh;
+                }
+                return table;
+            }
+
             public byte[] Compute(byte[] associatedData, byte[] cipherText)
             {
-                byte[] y = new byte[BlockSize];
-                Absorb(y, associatedData);
-                Absorb(y, cipherText);
+                // The state Y is kept as two 64 bit halves (big endian), no byte array per block
+                ulong yh = 0;
+                ulong yl = 0;
+                Absorb(ref yh, ref yl, associatedData);
+                Absorb(ref yh, ref yl, cipherText);
 
                 // len(A) || len(C) in bits, 64 bit big endian each
-                byte[] lengths = new byte[BlockSize];
-                BigEndianWriter.WriteUInt64(lengths, 0, (ulong)associatedData.Length * 8);
-                BigEndianWriter.WriteUInt64(lengths, 8, (ulong)cipherText.Length * 8);
-                for (int index = 0; index < BlockSize; index++)
-                {
-                    y[index] ^= lengths[index];
-                }
-                MultiplyByH(y);
-                return y;
+                yh ^= (ulong)associatedData.Length * 8;
+                yl ^= (ulong)cipherText.Length * 8;
+                MultiplyByH(ref yh, ref yl);
+
+                byte[] result = new byte[BlockSize];
+                BigEndianWriter.WriteUInt64(result, 0, yh);
+                BigEndianWriter.WriteUInt64(result, 8, yl);
+                return result;
             }
 
             // Y = (Y xor block) * H for every block; the last block is padded with zeros
-            private void Absorb(byte[] y, byte[] data)
+            private void Absorb(ref ulong yh, ref ulong yl, byte[] data)
             {
-                for (int offset = 0; offset < data.Length; offset += BlockSize)
+                int fullBlocksEnd = data.Length - data.Length % BlockSize;
+                for (int offset = 0; offset < fullBlocksEnd; offset += BlockSize)
                 {
-                    int length = Math.Min(BlockSize, data.Length - offset);
-                    for (int index = 0; index < length; index++)
-                    {
-                        y[index] ^= data[offset + index];
-                    }
-                    MultiplyByH(y);
+                    yh ^= ReadUInt64(data, offset);
+                    yl ^= ReadUInt64(data, offset + 8);
+                    MultiplyByH(ref yh, ref yl);
+                }
+
+                if (fullBlocksEnd < data.Length)
+                {
+                    byte[] last = new byte[BlockSize];
+                    Array.Copy(data, fullBlocksEnd, last, 0, data.Length - fullBlocksEnd);
+                    yh ^= ReadUInt64(last, 0);
+                    yl ^= ReadUInt64(last, 8);
+                    MultiplyByH(ref yh, ref yl);
                 }
             }
 
-            private void MultiplyByH(byte[] x)
+            private static ulong ReadUInt64(byte[] buffer, int offset)
             {
-                int low = x[15] & 0x0F;
-                ulong zh = m_high[low];
-                ulong zl = m_low[low];
+                return ((ulong)buffer[offset] << 56) | ((ulong)buffer[offset + 1] << 48) | ((ulong)buffer[offset + 2] << 40) | ((ulong)buffer[offset + 3] << 32) |
+                       ((ulong)buffer[offset + 4] << 24) | ((ulong)buffer[offset + 5] << 16) | ((ulong)buffer[offset + 6] << 8) | buffer[offset + 7];
+            }
 
-                for (int index = 15; index >= 0; index--)
+            // Y = Y * H, Horner's scheme over the bytes: from the highest power of x (the last byte, the low byte of
+            // yl) down to the first byte (the high byte of yh)
+            private void MultiplyByH(ref ulong yh, ref ulong yl)
+            {
+                ulong[] high = m_high;
+                ulong[] low = m_low;
+                ulong[] reduction = Reduction8;
+                ulong zh = 0;
+                ulong zl = 0;
+
+                for (int shift = 0; shift < 64; shift += 8)
                 {
-                    low = x[index] & 0x0F;
-                    int high = (x[index] >> 4) & 0x0F;
-
-                    if (index != 15)
-                    {
-                        int remainder = (int)(zl & 0x0F);
-                        zl = (zh << 60) | (zl >> 4);
-                        zh = (zh >> 4) ^ (Last4[remainder] << 48);
-                        zh ^= m_high[low];
-                        zl ^= m_low[low];
-                    }
-
-                    int remainder2 = (int)(zl & 0x0F);
-                    zl = (zh << 60) | (zl >> 4);
-                    zh = (zh >> 4) ^ (Last4[remainder2] << 48);
-                    zh ^= m_high[high];
-                    zl ^= m_low[high];
+                    int value = (int)(yl >> shift) & 0xFF;
+                    ulong fallingOff = zl & 0xFF;
+                    zl = (zh << 56) | (zl >> 8);
+                    zh = (zh >> 8) ^ reduction[fallingOff] ^ high[value];
+                    zl ^= low[value];
                 }
 
-                BigEndianWriter.WriteUInt64(x, 0, zh);
-                BigEndianWriter.WriteUInt64(x, 8, zl);
+                for (int shift = 0; shift < 64; shift += 8)
+                {
+                    int value = (int)(yh >> shift) & 0xFF;
+                    ulong fallingOff = zl & 0xFF;
+                    zl = (zh << 56) | (zl >> 8);
+                    zh = (zh >> 8) ^ reduction[fallingOff] ^ high[value];
+                    zl ^= low[value];
+                }
+
+                yh = zh;
+                yl = zl;
             }
         }
     }

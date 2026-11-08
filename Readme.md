@@ -36,6 +36,7 @@ The changes compared to SMBLibrary 1.5.8.1:
 - The server side is unchanged and supports dialects up to SMB 3.0.
 - SMBClientConsole (smbclient, .NET 10) is a command line client to test against real servers: it shows the negotiated dialect, cipher and signing algorithm and has file commands and a throughput test. Run it without arguments for help.
 - Tested with SMBClientConsole against Samba 4.19: SMB 2.1, 3.0, 3.0.2 and 3.1.1; all four ciphers with encryption required; AES-GMAC, AES-CMAC and HMAC-SHA256 signing.
+- Tested with SMBClientConsole against Windows Server: SMB 3.1.1 with AES-GMAC signing; listing shares and directories, upload; a share with EncryptData enabled with each of AES-128-GCM, AES-256-GCM, AES-128-CCM and AES-256-CCM (256 MB written, read back and verified). Write speed equals that of Windows itself (robocopy) on the same server.
 
 Supported SMB / CIFS transport methods:
 =======================================

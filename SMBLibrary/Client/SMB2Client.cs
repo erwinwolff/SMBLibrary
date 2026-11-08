@@ -993,6 +993,23 @@ namespace SMBLibrary.Client
             }
         }
 
+        /// <summary>
+        /// True when every message for the share of this file store is encrypted (the share or the session requires it).
+        /// Also works for DFS namespace roots, which TreeConnect returns wrapped.
+        /// </summary>
+        public static bool IsShareEncrypted(ISMBFileStore fileStore)
+        {
+            if (fileStore is SMB2FileStore smb2FileStore)
+            {
+                return smb2FileStore.IsEncrypted;
+            }
+            if (fileStore is SMB2DfsFileStore dfsFileStore)
+            {
+                return dfsFileStore.IsEncrypted;
+            }
+            return false;
+        }
+
         public uint MaxTransactSize
         {
             get

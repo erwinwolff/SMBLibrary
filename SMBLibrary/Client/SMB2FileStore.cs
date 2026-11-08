@@ -27,6 +27,17 @@ namespace SMBLibrary.Client
             m_encryptShareData = encryptShareData;
         }
 
+        /// <summary>
+        /// True when every message for this share is encrypted (the share or the session requires it)
+        /// </summary>
+        public bool IsEncrypted
+        {
+            get
+            {
+                return m_encryptShareData;
+            }
+        }
+
         public NTStatus CreateFile(out object handle, out FileStatus fileStatus, string path, AccessMask desiredAccess, FileAttributes fileAttributes, ShareAccess shareAccess, CreateDisposition createDisposition, CreateOptions createOptions, SecurityContext securityContext)
         {
             handle = null;

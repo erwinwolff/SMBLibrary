@@ -55,6 +55,18 @@ namespace SMBLibrary.Client.DFS
             SetDfsOperations(m_dfsFileStore, m_useDfsPaths);
         }
 
+        /// <summary>
+        /// Encryption of the namespace root share itself; link targets on other shares decide for themselves
+        /// </summary>
+        internal bool IsEncrypted
+        {
+            get
+            {
+                SMB2FileStore fileStore = m_dfsFileStore as SMB2FileStore;
+                return fileStore != null && fileStore.IsEncrypted;
+            }
+        }
+
         internal void TakeOwnershipOf(SMB2Client client)
         {
             m_ownedClient = client;

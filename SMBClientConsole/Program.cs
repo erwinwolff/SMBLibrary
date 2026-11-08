@@ -178,7 +178,7 @@ namespace SMBClientConsole
 
                     bool isDirectory = (entry.FileAttributes & FileAttributes.Directory) > 0;
                     string size = isDirectory ? "<DIR>" : entry.EndOfFile.ToString("N0");
-                    Console.WriteLine($"{entry.LastWriteTime:yyyy-MM-dd HH:mm}  {size,15}  {entry.FileName}");
+                    Console.WriteLine($"{entry.LastWriteTime.ToLocalTime():yyyy-MM-dd HH:mm}  {size,15}  {entry.FileName}");
                 }
                 return true;
             }
@@ -361,6 +361,8 @@ namespace SMBClientConsole
             {
                 return Fail($"Connecting to share '{share}'", status);
             }
+
+            Console.WriteLine($"Share '{share}':      {(SMB2Client.IsShareEncrypted(store) ? "encrypted with " + client.Cipher : "not encrypted")} ({store.GetType().Name})");
 
             try
             {

@@ -29,7 +29,15 @@ namespace SMBLibrary.SMB2
             switch (signingAlgorithm)
             {
                 case SigningAlgorithm.HmacSha256:
-                    hash = new HMACSHA256(signingKey).ComputeHash(buffer, offset, paddedLength);
+#if NET
+                    // One-shot API: no HMAC object, the message is passed as a slice
+                    hash = HMACSHA256.HashData(signingKey, new ReadOnlySpan<byte>(buffer, offset, paddedLength));
+#else
+                    using (HMACSHA256 hmac = new HMACSHA256(signingKey))
+                    {
+                        hash = hmac.ComputeHash(buffer, offset, paddedLength);
+                    }
+#endif
                     break;
                 case SigningAlgorithm.AesCmac:
                     hash = AesCmac.CalculateAesCmac(signingKey, buffer, offset, paddedLength);
@@ -260,7 +268,14 @@ namespace SMBLibrary.SMB2
         {
             if (hashAlgorithm == HashAlgorithm.SHA512)
             {
-                return SHA512.Create().ComputeHash(buffer);
+#if NET
+                return SHA512.HashData(buffer);
+#else
+                using (SHA512 sha512 = SHA512.Create())
+                {
+                    return sha512.ComputeHash(buffer);
+                }
+#endif
             }
             else
             {
