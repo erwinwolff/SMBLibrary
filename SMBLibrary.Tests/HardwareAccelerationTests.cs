@@ -178,19 +178,6 @@ namespace SMBLibrary.Tests
             Assert.IsTrue(Throws(() => AesCcm.DecryptAndAuthenticate(key, ccmNonce, encrypted, associatedData, signature)), "CCM");
         }
 
-#if NETFRAMEWORK
-        [TestMethod]
-        public void TestWindowsCngIsUsed()
-        {
-            // On Windows the .NET Framework build must take the CNG path, not the managed fallback
-            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
-            {
-                Assert.IsTrue(BCryptAead.IsGcmSupported, "AES-GCM through CNG");
-                Assert.IsTrue(BCryptAead.IsCcmSupported, "AES-CCM through CNG");
-            }
-        }
-#endif
-
         private static bool Throws(Action action)
         {
             try

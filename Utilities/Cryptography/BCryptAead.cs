@@ -4,7 +4,7 @@
  * the GNU Lesser Public License as published by the Free Software Foundation,
  * either version 3 of the License, or (at your option) any later version.
  */
-#if NETFRAMEWORK || BCRYPT_COMPILE_CHECK
+#if NETFRAMEWORK
 using System;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -13,9 +13,8 @@ namespace Utilities
 {
     /// <summary>
     /// AES-GCM and AES-CCM through Windows CNG (bcrypt.dll) for .NET Framework, which has no managed AEAD classes.
-    /// CNG uses AES-NI and PCLMULQDQ when the processor has them. When bcrypt.dll or the chaining mode is not
-    /// available (Mono on Linux, very old Windows), IsGcmSupported / IsCcmSupported are false and the callers fall
-    /// back to the managed implementations.
+    /// CNG uses AES-NI and PCLMULQDQ when the processor has them. .NET Framework 4.8.1 only runs on Windows 10 and
+    /// later, where CNG always supports both chaining modes, so there is no managed fallback here.
     /// </summary>
     internal static class BCryptAead
     {
@@ -30,22 +29,6 @@ namespace Utilities
         // Algorithm handles are thread safe and live for the lifetime of the process
         private static readonly Lazy<IntPtr> GcmAlgorithm = new Lazy<IntPtr>(() => OpenAlgorithm(ChainingModeGcm));
         private static readonly Lazy<IntPtr> CcmAlgorithm = new Lazy<IntPtr>(() => OpenAlgorithm(ChainingModeCcm));
-
-        public static bool IsGcmSupported
-        {
-            get
-            {
-                return GcmAlgorithm.Value != IntPtr.Zero;
-            }
-        }
-
-        public static bool IsCcmSupported
-        {
-            get
-            {
-                return CcmAlgorithm.Value != IntPtr.Zero;
-            }
-        }
 
         public static byte[] EncryptGcm(byte[] key, byte[] nonce, byte[] data, int offset, int length, byte[] associatedData, int tagLength, out byte[] tag)
         {
@@ -96,11 +79,6 @@ namespace Utilities
 
         private static void Transform(IntPtr algorithm, bool encrypt, byte[] key, byte[] nonce, byte[] input, int inputOffset, int inputLength, byte[] associatedData, int associatedDataOffset, int associatedDataLength, byte[] tag, byte[] output)
         {
-            if (algorithm == IntPtr.Zero)
-            {
-                throw new PlatformNotSupportedException("The chaining mode is not supported by Windows CNG on this system");
-            }
-
             IntPtr keyHandle;
             CheckStatus(BCryptGenerateSymmetricKey(algorithm, out keyHandle, IntPtr.Zero, 0, key, key.Length, 0));
 
@@ -156,35 +134,17 @@ namespace Utilities
 
         private static IntPtr OpenAlgorithm(string chainingMode)
         {
-            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
-            {
-                return IntPtr.Zero;
-            }
+            IntPtr algorithm;
+            CheckStatus(BCryptOpenAlgorithmProvider(out algorithm, AesAlgorithm, null, 0));
 
-            try
+            // The property value is a null terminated UTF-16 string; its length includes the terminator
+            int status = BCryptSetProperty(algorithm, ChainingModeProperty, chainingMode, (chainingMode.Length + 1) * 2, 0);
+            if (status != StatusSuccess)
             {
-                IntPtr algorithm;
-                if (BCryptOpenAlgorithmProvider(out algorithm, AesAlgorithm, null, 0) != StatusSuccess)
-                {
-                    return IntPtr.Zero;
-                }
-
-                // The property value is a null terminated UTF-16 string; its length includes the terminator
-                if (BCryptSetProperty(algorithm, ChainingModeProperty, chainingMode, (chainingMode.Length + 1) * 2, 0) != StatusSuccess)
-                {
-                    BCryptCloseAlgorithmProvider(algorithm, 0);
-                    return IntPtr.Zero;
-                }
-                return algorithm;
+                BCryptCloseAlgorithmProvider(algorithm, 0);
+                CheckStatus(status);
             }
-            catch (DllNotFoundException)
-            {
-                return IntPtr.Zero;
-            }
-            catch (EntryPointNotFoundException)
-            {
-                return IntPtr.Zero;
-            }
+            return algorithm;
         }
 
         private static void CheckStatus(int status)

@@ -11,8 +11,8 @@ namespace Utilities
 {
     /// <summary>
     /// AES in Galois/Counter Mode (NIST SP 800-38D) with a 96 bit nonce and a 128 bit tag, the variant SMB 3.1.1 uses.
-    /// .NET 10 uses the AesGcm class of the platform, .NET Framework uses Windows CNG (both hardware accelerated); the
-    /// managed implementation is the fallback when neither is available.
+    /// .NET 10 uses the AesGcm class of the platform, .NET Framework uses Windows CNG (both hardware accelerated). The
+    /// managed implementation is the fallback on .NET 10 when the platform has no AES-GCM.
     /// </summary>
     public static class AesGcmCipher
     {
@@ -22,7 +22,9 @@ namespace Utilities
         public static byte[] Encrypt(byte[] key, byte[] nonce, byte[] data, byte[] associatedData, out byte[] tag)
         {
             Validate(key, nonce);
-#if NET
+#if NETFRAMEWORK
+            return BCryptAead.EncryptGcm(key, nonce, data, 0, data.Length, associatedData, TagLength, out tag);
+#else
             if (System.Security.Cryptography.AesGcm.IsSupported)
             {
                 byte[] result = new byte[data.Length];
@@ -33,13 +35,8 @@ namespace Utilities
                 }
                 return result;
             }
-#else
-            if (BCryptAead.IsGcmSupported)
-            {
-                return BCryptAead.EncryptGcm(key, nonce, data, 0, data.Length, associatedData, TagLength, out tag);
-            }
-#endif
             return AesGcmManaged.Encrypt(key, nonce, data, associatedData, out tag);
+#endif
         }
 
         /// <exception cref="CryptographicException">The data or the associated data was changed, or the key is wrong</exception>
@@ -50,7 +47,9 @@ namespace Utilities
             {
                 throw new ArgumentException("tag must be 16 bytes long");
             }
-#if NET
+#if NETFRAMEWORK
+            return BCryptAead.DecryptGcm(key, nonce, encryptedData, associatedData, tag);
+#else
             if (System.Security.Cryptography.AesGcm.IsSupported)
             {
                 byte[] result = new byte[encryptedData.Length];
@@ -61,13 +60,8 @@ namespace Utilities
                 }
                 return result;
             }
-#else
-            if (BCryptAead.IsGcmSupported)
-            {
-                return BCryptAead.DecryptGcm(key, nonce, encryptedData, associatedData, tag);
-            }
-#endif
             return AesGcmManaged.DecryptAndAuthenticate(key, nonce, encryptedData, associatedData, tag);
+#endif
         }
 
         /// <summary>
@@ -76,7 +70,10 @@ namespace Utilities
         public static byte[] ComputeGmac(byte[] key, byte[] nonce, byte[] data, int offset, int length)
         {
             Validate(key, nonce);
-#if NET
+#if NETFRAMEWORK
+            // The message is passed as a pointer into the array: no copy
+            return BCryptAead.ComputeGmac(key, nonce, data, offset, length, TagLength);
+#else
             if (System.Security.Cryptography.AesGcm.IsSupported)
             {
                 // The message is passed as a slice: no copy
@@ -87,17 +84,11 @@ namespace Utilities
                 }
                 return gmac;
             }
-#else
-            if (BCryptAead.IsGcmSupported)
-            {
-                // The message is passed as a pointer into the array: no copy
-                return BCryptAead.ComputeGmac(key, nonce, data, offset, length, TagLength);
-            }
-#endif
             byte[] associatedData = ByteReader.ReadBytes(data, offset, length);
             byte[] tag;
             AesGcmManaged.Encrypt(key, nonce, new byte[0], associatedData, out tag);
             return tag;
+#endif
         }
 
         private static void Validate(byte[] key, byte[] nonce)

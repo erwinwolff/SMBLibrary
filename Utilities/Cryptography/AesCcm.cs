@@ -12,14 +12,16 @@ namespace Utilities
     /// <summary>
     /// Implements the Counter with CBC-MAC (CCM) detailed in RFC 3610.
     /// .NET 10 uses the AesCcm class of the platform, .NET Framework uses Windows CNG (both hardware accelerated).
-    /// AesCcmManaged is the fallback, in which the AES operations themselves still run in the platform AES (AES-NI).
+    /// AesCcmManaged is the fallback on .NET 10 when the platform has no AES-CCM, in which the AES operations themselves still run in the platform AES (AES-NI).
     /// </summary>
     public static class AesCcm
     {
         public static byte[] Encrypt(byte[] key, byte[] nonce, byte[] data, byte[] associatedData, int signatureLength, out byte[] signature)
         {
             AesCcmManaged.Validate(nonce, signatureLength);
-#if NET
+#if NETFRAMEWORK
+            return BCryptAead.EncryptCcm(key, nonce, data, associatedData, signatureLength, out signature);
+#else
             if (System.Security.Cryptography.AesCcm.IsSupported)
             {
                 byte[] result = new byte[data.Length];
@@ -30,20 +32,17 @@ namespace Utilities
                 }
                 return result;
             }
-#else
-            if (BCryptAead.IsCcmSupported)
-            {
-                return BCryptAead.EncryptCcm(key, nonce, data, associatedData, signatureLength, out signature);
-            }
-#endif
             return AesCcmManaged.Encrypt(key, nonce, data, associatedData, signatureLength, out signature);
+#endif
         }
 
         /// <exception cref="CryptographicException">The data or the associated data was changed, or the key is wrong</exception>
         public static byte[] DecryptAndAuthenticate(byte[] key, byte[] nonce, byte[] encryptedData, byte[] associatedData, byte[] signature)
         {
             AesCcmManaged.Validate(nonce, signature.Length);
-#if NET
+#if NETFRAMEWORK
+            return BCryptAead.DecryptCcm(key, nonce, encryptedData, associatedData, signature);
+#else
             if (System.Security.Cryptography.AesCcm.IsSupported)
             {
                 byte[] result = new byte[encryptedData.Length];
@@ -54,13 +53,8 @@ namespace Utilities
                 }
                 return result;
             }
-#else
-            if (BCryptAead.IsCcmSupported)
-            {
-                return BCryptAead.DecryptCcm(key, nonce, encryptedData, associatedData, signature);
-            }
-#endif
             return AesCcmManaged.DecryptAndAuthenticate(key, nonce, encryptedData, associatedData, signature);
+#endif
         }
     }
 
