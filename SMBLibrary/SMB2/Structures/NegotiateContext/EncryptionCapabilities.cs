@@ -26,7 +26,7 @@ namespace SMBLibrary.SMB2
             ushort cipherCount = LittleEndianConverter.ToUInt16(Data, 0);
             for (int index = 0; index < cipherCount; index++)
             {
-                Ciphers.Add((CipherAlgorithm)LittleEndianConverter.ToUInt16(Data, index * 2));
+                Ciphers.Add((CipherAlgorithm)LittleEndianConverter.ToUInt16(Data, 2 + index * 2));
             }
         }
 

@@ -53,6 +53,8 @@ namespace SMBLibrary.Client
         private bool m_encryptSessionData;
         private byte[] m_encryptionKey;
         private byte[] m_decryptionKey;
+        private bool m_encryptionSupported;
+        private CipherAlgorithm m_cipherId = CipherAlgorithm.Aes128Ccm; // Connection.CipherId
         private uint m_maxTransactSize;
         private uint m_maxReadSize;
         private uint m_maxWriteSize;
@@ -242,6 +244,24 @@ namespace SMBLibrary.Client
             if (response != null && response.Header.Status == NTStatus.STATUS_SUCCESS)
             {
                 m_dialect = response.DialectRevision;
+
+                // SMB 3.0 and 3.0.2 know only AES-128-CCM; SMB 3.1.1 negotiates the cipher
+                m_cipherId = CipherAlgorithm.Aes128Ccm;
+                m_encryptionSupported = response.DialectRevision >= SMB2Dialect.SMB300;
+                if (response.DialectRevision == SMB2Dialect.SMB311)
+                {
+                    // [MS-SMB2] 3.2.5.2 The server answers with the one cipher it selected, or with 0 when it supports none of ours
+                    m_encryptionSupported = false;
+                    foreach (NegotiateContext context in response.NegotiateContextList)
+                    {
+                        EncryptionCapabilities encryptionCapabilities = context as EncryptionCapabilities;
+                        if (encryptionCapabilities != null && encryptionCapabilities.Ciphers.Count == 1 && SMB2Cryptography.IsSupportedCipher(encryptionCapabilities.Ciphers[0]))
+                        {
+                            m_cipherId = encryptionCapabilities.Ciphers[0];
+                            m_encryptionSupported = true;
+                        }
+                    }
+                }
                 // [MS-SMB2] 3.3.5.7 If Connection.Dialect is "3.1.1" and Session.IsAnonymous and Session.IsGuest
                 // are set to FALSE and the request is not signed or not encrypted, then the server MUST disconnect the connection.
                 m_signingRequired = (response.SecurityMode & SecurityMode.SigningRequired) > 0 ||
@@ -328,8 +348,17 @@ namespace SMBLibrary.Client
                     if (m_dialect >= SMB2Dialect.SMB300)
                     {
                         m_encryptSessionData = (sessionFlags & SessionFlags.EncryptData) > 0;
-                        m_encryptionKey = SMB2Cryptography.GenerateClientEncryptionKey(m_sessionKey, m_dialect, m_preauthIntegrityHashValue);
-                        m_decryptionKey = SMB2Cryptography.GenerateClientDecryptionKey(m_sessionKey, m_dialect, m_preauthIntegrityHashValue);
+                        if (m_encryptionSupported)
+                        {
+                            m_encryptionKey = SMB2Cryptography.GenerateClientEncryptionKey(m_sessionKey, m_dialect, m_preauthIntegrityHashValue, m_cipherId);
+                            m_decryptionKey = SMB2Cryptography.GenerateClientDecryptionKey(m_sessionKey, m_dialect, m_preauthIntegrityHashValue, m_cipherId);
+                        }
+                        else if (m_encryptSessionData)
+                        {
+                            // The server requires encryption, but it accepted none of our ciphers
+                            m_isLoggedIn = false;
+                            return NTStatus.STATUS_ACCESS_DENIED;
+                        }
                     }
                 }
                 return response.Header.Status;
@@ -446,6 +475,12 @@ namespace SMBLibrary.Client
                 if (response.Header.Status == NTStatus.STATUS_SUCCESS && response is TreeConnectResponse treeConnectResponse)
                 {
                     bool encryptShareData = (treeConnectResponse.ShareFlags & ShareFlags.EncryptData) > 0;
+                    if (encryptShareData && !m_encryptionSupported)
+                    {
+                        // The share requires encryption, but no cipher was negotiated: never send its data in plain text
+                        status = NTStatus.STATUS_ACCESS_DENIED;
+                        return null;
+                    }
                     SMB2FileStore fileStore = new SMB2FileStore(this, response.Header.TreeID, m_encryptSessionData || encryptShareData);
                     if ((treeConnectResponse.ShareFlags & ShareFlags.DfsRoot) > 0)
                     {
@@ -579,7 +614,7 @@ namespace SMBLibrary.Client
                 {
                     SMB2TransformHeader transformHeader = new SMB2TransformHeader(packet.Trailer, 0);
                     byte[] encryptedMessage = ByteReader.ReadBytes(packet.Trailer, SMB2TransformHeader.Length, (int)transformHeader.OriginalMessageSize);
-                    messageBytes = SMB2Cryptography.DecryptMessage(m_decryptionKey, transformHeader, encryptedMessage);
+                    messageBytes = SMB2Cryptography.DecryptMessage(m_decryptionKey, transformHeader, encryptedMessage, m_cipherId);
                 }
                 else
                 {
@@ -849,7 +884,19 @@ namespace SMBLibrary.Client
             SecureRandom.GetBytes(preAuthIntegrityCapabilities.Salt);
 
             EncryptionCapabilities encryptionCapabilities = new EncryptionCapabilities();
+            // In order of preference. .NET has hardware accelerated AES-GCM, so GCM first (the order Windows uses);
+            // .NET Framework only has the managed GCM, which is slower than CCM there, so CCM first
+#if NET
+            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Gcm);
             encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Ccm);
+            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Gcm);
+            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Ccm);
+#else
+            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Ccm);
+            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Gcm);
+            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Ccm);
+            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Gcm);
+#endif
 
             return new List<NegotiateContext>()
             {
@@ -904,7 +951,7 @@ namespace SMBLibrary.Client
             if (encryptionKey != null)
             {
                 byte[] requestBytes = request.GetBytes();
-                packet.Trailer = SMB2Cryptography.TransformMessage(encryptionKey, requestBytes, request.Header.SessionID);
+                packet.Trailer = SMB2Cryptography.TransformMessage(encryptionKey, requestBytes, request.Header.SessionID, m_cipherId);
             }
             else
             {
