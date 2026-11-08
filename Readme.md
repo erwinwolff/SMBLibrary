@@ -5,6 +5,7 @@ SMBLibrary gives .NET developers an easy way to share a directory / file system 
 SMBLibrary is modular, you can take advantage of Integrated Windows Authentication and the Windows storage subsystem on a Windows host or use independent implementations that allow for cross-platform compatibility.  
 SMBLibrary can communicate with any Windows version since Windows NT 4.0.  
 
+This fork is maintained by Micro Formatica. It remains licensed under the LGPL (version 3 or later), like the original.  
 Supported SMB / CIFS transport methods:
 =======================================
 • NetBIOS over TCP (port 139)  
