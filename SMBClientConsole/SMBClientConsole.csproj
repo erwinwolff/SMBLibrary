@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>smbclient</AssemblyName>
+    <RootNamespace>SMBClientConsole</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Copyright>Copyright © Micro Formatica 2026</Copyright>
+    <Description>Command line SMB2/SMB3 client for testing SMBLibrary against Windows and Samba servers</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SMBLibrary\SMBLibrary.csproj" />
+  </ItemGroup>
+
+  <!-- In Release Utilities is merged into SMBLibrary (ILRepack), in Debug it is a separate assembly -->
+  <ItemGroup Condition="'$(Configuration)' != 'Release'">
+    <ProjectReference Include="..\Utilities\Utilities.csproj" />
+  </ItemGroup>
+
+</Project>

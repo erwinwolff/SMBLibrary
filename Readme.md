@@ -34,7 +34,8 @@ The changes compared to SMBLibrary 1.5.8.1:
 ###### Notes
 - SMB 3.1.1 is still enabled per client: new SMB2Client(true).
 - The server side is unchanged and supports dialects up to SMB 3.0.
-- The changes are covered by unit tests; interoperability tests against Windows and Samba servers are still to be done.
+- SMBClientConsole (smbclient, .NET 10) is a command line client to test against real servers: it shows the negotiated dialect, cipher and signing algorithm and has file commands and a throughput test. Run it without arguments for help.
+- Tested with SMBClientConsole against Samba 4.19: SMB 2.1, 3.0, 3.0.2 and 3.1.1; all four ciphers with encryption required; AES-GMAC, AES-CMAC and HMAC-SHA256 signing.
 
 Supported SMB / CIFS transport methods:
 =======================================

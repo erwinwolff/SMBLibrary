@@ -56,6 +56,33 @@ namespace SMBLibrary.Client
         private bool m_encryptionSupported;
         private CipherAlgorithm m_cipherId = CipherAlgorithm.Aes128Ccm; // Connection.CipherId
         private SigningAlgorithm m_signingAlgorithm = SigningAlgorithm.HmacSha256; // Connection.SigningAlgorithmId
+
+        /// <summary>
+        /// The ciphers offered for SMB 3.1.1, in order of preference. Change before Connect, e.g. to force one cipher.
+        /// .NET has hardware accelerated AES-GCM, so GCM first (the order Windows uses); .NET Framework only has the
+        /// managed GCM, which is slower than CCM there, so CCM first.
+        /// </summary>
+        public List<CipherAlgorithm> EncryptionCiphers { get; set; } = new List<CipherAlgorithm>
+        {
+#if NET
+            CipherAlgorithm.Aes128Gcm, CipherAlgorithm.Aes128Ccm, CipherAlgorithm.Aes256Gcm, CipherAlgorithm.Aes256Ccm
+#else
+            CipherAlgorithm.Aes128Ccm, CipherAlgorithm.Aes128Gcm, CipherAlgorithm.Aes256Ccm, CipherAlgorithm.Aes256Gcm
+#endif
+        };
+
+        /// <summary>
+        /// The signing algorithms offered for SMB 3.1.1, in order of preference. Change before Connect.
+        /// Same reasoning as the ciphers: AES-GMAC is the fast one on .NET, AES-CMAC on .NET Framework.
+        /// </summary>
+        public List<SigningAlgorithm> SigningAlgorithms { get; set; } = new List<SigningAlgorithm>
+        {
+#if NET
+            SigningAlgorithm.AesGmac, SigningAlgorithm.AesCmac
+#else
+            SigningAlgorithm.AesCmac, SigningAlgorithm.AesGmac
+#endif
+        };
         private uint m_maxTransactSize;
         private uint m_maxReadSize;
         private uint m_maxWriteSize;
@@ -900,29 +927,10 @@ namespace SMBLibrary.Client
             SecureRandom.GetBytes(preAuthIntegrityCapabilities.Salt);
 
             EncryptionCapabilities encryptionCapabilities = new EncryptionCapabilities();
-            // In order of preference. .NET has hardware accelerated AES-GCM, so GCM first (the order Windows uses);
-            // .NET Framework only has the managed GCM, which is slower than CCM there, so CCM first
-#if NET
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Gcm);
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Ccm);
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Gcm);
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Ccm);
-#else
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Ccm);
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes128Gcm);
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Ccm);
-            encryptionCapabilities.Ciphers.Add(CipherAlgorithm.Aes256Gcm);
-#endif
+            encryptionCapabilities.Ciphers.AddRange(EncryptionCiphers);
 
-            // Same reasoning as the ciphers: AES-GMAC is the fast one on .NET, AES-CMAC on .NET Framework
             SigningCapabilities signingCapabilities = new SigningCapabilities();
-#if NET
-            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesGmac);
-            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesCmac);
-#else
-            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesCmac);
-            signingCapabilities.SigningAlgorithms.Add(SigningAlgorithm.AesGmac);
-#endif
+            signingCapabilities.SigningAlgorithms.AddRange(SigningAlgorithms);
 
             return new List<NegotiateContext>()
             {
@@ -930,6 +938,59 @@ namespace SMBLibrary.Client
                 encryptionCapabilities,
                 signingCapabilities
             };
+        }
+
+        /// <summary>The negotiated dialect</summary>
+        public SMB2Dialect Dialect
+        {
+            get
+            {
+                return m_dialect;
+            }
+        }
+
+        /// <summary>The cipher of the connection (Connection.CipherId); only meaningful when IsEncryptionSupported</summary>
+        public CipherAlgorithm Cipher
+        {
+            get
+            {
+                return m_cipherId;
+            }
+        }
+
+        /// <summary>True when the server and this client share a cipher (always true for SMB 3.0 and 3.0.2)</summary>
+        public bool IsEncryptionSupported
+        {
+            get
+            {
+                return m_encryptionSupported;
+            }
+        }
+
+        /// <summary>True when the server requires encryption of the whole session (set after Login)</summary>
+        public bool IsSessionEncrypted
+        {
+            get
+            {
+                return m_encryptSessionData;
+            }
+        }
+
+        /// <summary>The signing algorithm of the connection (Connection.SigningAlgorithmId)</summary>
+        public SigningAlgorithm SigningAlgorithm
+        {
+            get
+            {
+                return m_signingAlgorithm;
+            }
+        }
+
+        public bool IsSigningRequired
+        {
+            get
+            {
+                return m_signingRequired;
+            }
         }
 
         public uint MaxTransactSize
